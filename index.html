@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日出方位</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='44' rx='30' ry='12' fill='%2322b14c'/%3E%3Ccircle cx='32' cy='26' r='14' fill='%23ffb000'/%3E%3C/svg%3E">
+<style>
+  :root { --bg: #000; --fg: #eee; --muted: #999; --accent: #ffb000; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden;
+    font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #stage ruffle-player { width: 100%; height: 100%; }
+  #status { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 12px; text-align: center; padding: 16px; pointer-events: none; }
+  #status[hidden] { display: none; }
+  #status h1 { margin: 0; color: var(--accent); font-size: 36px; letter-spacing: 6px; }
+  #status p { margin: 0; color: var(--muted); line-height: 1.6; }
+  #status.error p { color: #ff8a80; pointer-events: auto; }
+  #fs { position: fixed; top: 8px; right: 8px; z-index: 10; padding: 6px 10px; font: inherit; font-size: 13px;
+    color: var(--fg); background: rgba(40, 40, 40, .7); border: 1px solid #555; border-radius: 6px;
+    cursor: pointer; opacity: .35; transition: opacity .2s; }
+  #fs:hover, #fs:focus-visible { opacity: 1; }
+  :fullscreen #fs { display: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="status"><h1>日出方位</h1><p id="msg">載入中…</p></div>
+<button id="fs" type="button" title="全螢幕（Esc 離開）">⛶ 全螢幕</button>
+
+<script>
+  // 瀏覽器直接開本機檔案（file://）時不允許 fetch 讀檔，
+  // 所以 wasm 事先包成 .js，這裡攔截 Ruffle 的 fetch，改從 script 標籤載入。
+  (function () {
+    const realFetch = window.fetch.bind(window);
+    const loadScript = (src) => new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = resolve;
+      s.onerror = () => reject(new Error("無法載入 " + src));
+      document.head.appendChild(s);
+    });
+    const decode = (b64) => {
+      if (Uint8Array.fromBase64) return Uint8Array.fromBase64(b64);
+      const bin = atob(b64), out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    };
+    window.__decodeBase64 = decode;
+    window.__loadScript = loadScript;
+    window.fetch = async function (input, init) {
+      const url = String(input instanceof Request ? input.url : input);
+      const m = url.match(/([^/?#]+\.wasm)(?:[?#].*)?$/);
+      if (!m) return realFetch(input, init);
+      const name = m[1];
+      window.__offlineFiles = window.__offlineFiles || {};
+      if (!window.__offlineFiles[name]) await loadScript("ruffle/" + name + ".js");
+      const bytes = decode(window.__offlineFiles[name]);
+      delete window.__offlineFiles[name];
+      return new Response(bytes, { headers: {
+        "Content-Type": "application/wasm", "Content-Length": String(bytes.length) } });
+    };
+  })();
+</script>
+<script src="ruffle/ruffle.js"></script>
+<script>
+  (function () {
+    const status = document.getElementById("status");
+    const msg = document.getElementById("msg");
+    const fail = (text) => { status.classList.add("error"); status.hidden = false; msg.textContent = text; };
+
+    if (!window.RufflePlayer) {
+      fail("找不到 ruffle/ 資料夾裡的檔案。請確認整個資料夾都有一起複製，不要只拿 index.html。");
+      return;
+    }
+    if (typeof WebAssembly !== "object") {
+      fail("這個瀏覽器不支援 WebAssembly，請改用新版的 Chrome、Edge 或 Firefox。");
+      return;
+    }
+
+    window.RufflePlayer.config = {
+      autoplay: "on",
+      unmuteOverlay: "hidden",
+      splashScreen: false,
+      letterbox: "on",
+      scale: "showAll",
+      quality: "high",
+      backgroundColor: "#000000",
+      contextMenu: "rightClickOnly",
+      showSwfDownload: false,
+      warnOnUnsupportedContent: false,
+      logLevel: "error",
+    };
+
+    const player = window.RufflePlayer.newest().createPlayer();
+    document.getElementById("stage").appendChild(player);
+    // 等 Ruffle 讀到 SWF 的基本資料（畫面大小等）才把「載入中」拿掉
+    const waitReady = setInterval(() => {
+      if (player.ruffle().metadata) { status.hidden = true; clearInterval(waitReady); player.focus(); }
+    }, 100);
+
+    window.__loadScript("game/sunrisetw.swf.js")
+      .then(() => player.ruffle().load({
+        data: window.__decodeBase64(window.__gameSwf.sunrisetw), swfFileName: "sunrisetw.swf" }))
+      .catch((e) => {
+        console.error(e);
+        fail("遊戲啟動失敗：" + (e && e.message ? e.message : e) + "。請確認 game/ 資料夾裡有 sunrisetw.swf.js。");
+      });
+
+    document.getElementById("fs").addEventListener("click", () => {
+      const el = document.documentElement;
+      (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    });
+  })();
+</script>
+</body>
+</html>
